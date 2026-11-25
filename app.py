@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -14,37 +13,37 @@ st.set_page_config(
 
 st.title("☀️ Simulador Técnico-Econômico de Sistemas Fotovoltaicos")
 st.markdown(
-    "Modelagem de geração mensal (CRESESB), perdas térmicas, sobrecarga estrutural, "
-    "regulação **Lei 14.300 (Fio B)** e análise de investimentos (**VPL, TIR e Payback**)."
+    "Modelagem de geração mensal (CRESESB), perdas térmicas (NOCT), sobrecarga estrutural, "
+    "regulação **Lei 14.300 (Fio B + Tributos)** e análise de investimentos (**VPL, TIR e Payback Fracionado**)."
 )
 
 # --- 1. BASE DE DADOS CLIMÁTICOS (12 MESES - CRESESB / INMET) ---
-meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
-dias_mes = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+meses = ("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+dias_mes = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 base_climatica = {
     "São João del-Rei - MG": {
-        "hsp": [5.65, 5.75, 5.25, 4.95, 4.55, 4.40, 4.65, 5.30, 5.45, 5.55, 5.40, 5.50],
+        "hsp": (5.65, 5.75, 5.25, 4.95, 4.55, 4.40, 4.65, 5.30, 5.45, 5.55, 5.40, 5.50),
         "temp_amb": 20.5,
         "tarifa_padrao": 0.94
     },
     "Belo Horizonte - MG": {
-        "hsp": [5.80, 5.95, 5.45, 5.15, 4.75, 4.60, 4.85, 5.50, 5.65, 5.75, 5.55, 5.65],
+        "hsp": (5.80, 5.95, 5.45, 5.15, 4.75, 4.60, 4.85, 5.50, 5.65, 5.75, 5.55, 5.65),
         "temp_amb": 22.0,
         "tarifa_padrao": 0.94
     },
     "São Paulo - SP": {
-        "hsp": [5.15, 5.30, 4.85, 4.35, 3.85, 3.65, 3.85, 4.45, 4.55, 4.90, 5.15, 5.25],
+        "hsp": (5.15, 5.30, 4.85, 4.35, 3.85, 3.65, 3.85, 4.45, 4.55, 4.90, 5.15, 5.25),
         "temp_amb": 20.0,
         "tarifa_padrao": 0.85
     },
     "Rio de Janeiro - RJ": {
-        "hsp": [5.85, 6.00, 5.35, 4.75, 4.15, 3.95, 4.10, 4.75, 4.85, 5.25, 5.55, 5.80],
+        "hsp": (5.85, 6.00, 5.35, 4.75, 4.15, 3.95, 4.10, 4.75, 4.85, 5.25, 5.55, 5.80),
         "temp_amb": 24.5,
         "tarifa_padrao": 1.05
     },
     "Brasília - DF": {
-        "hsp": [5.45, 5.60, 5.35, 5.45, 5.30, 5.25, 5.45, 6.05, 6.10, 5.75, 5.25, 5.25],
+        "hsp": (5.45, 5.60, 5.35, 5.45, 5.30, 5.25, 5.45, 6.05, 6.10, 5.75, 5.25, 5.25),
         "temp_amb": 21.5,
         "tarifa_padrao": 0.82
     }
@@ -54,33 +53,51 @@ base_climatica = {
 st.sidebar.header("1. Localidade e Consumo")
 cidade = st.sidebar.selectbox("Município de Instalação:", list(base_climatica.keys()))
 consumo_mensal = st.sidebar.number_input("Consumo Médio Mensal (kWh):", min_value=100, max_value=100000, value=2550, step=50)
-tipo_ligacao = st.sidebar.selectbox("Padrão de Entrada (Custo Disponibilidade):", ["Monofásico (30 kWh)", "Bifásico (50 kWh)", "Trifásico (100 kWh)"], index=2)
-tarifa = st.sidebar.number_input("Tarifa com Impostos (R$/kWh):", min_value=0.30, max_value=2.50, value=base_climatica[cidade]["tarifa_padrao"], step=0.02)
+tipo_ligacao = st.sidebar.selectbox(
+    "Padrão de Entrada (Custo Disponibilidade):",
+    ("Monofásico (30 kWh)", "Bifásico (50 kWh)", "Trifásico (100 kWh)"),
+    index=2
+)
+tarifa = st.sidebar.number_input(
+    "Tarifa com Impostos (R$/kWh):",
+    min_value=0.30,
+    max_value=2.50,
+    value=base_climatica.get(cidade).get("tarifa_padrao"),
+    step=0.02
+)
 
 st.sidebar.header("2. Premissas Técnicas (Módulos)")
-potencia_modulo_w = st.sidebar.selectbox("Potência do Módulo FV (W):", [550, 585, 610], index=0)
-simultaneidade = st.sidebar.slider("Fator de Simultaneidade (Autoconsumo %):", min_value=10, max_value=90, value=35, help="Percentual da energia gerada consumida instantaneamente sem passar pela rede da distribuidora.") / 100.0
+opcoes_modulos = (550, 585, 610)
+potencia_modulo_w = st.sidebar.selectbox("Potência do Módulo FV (W):", opcoes_modulos, index=0)
+simultaneidade = st.sidebar.slider(
+    "Fator de Simultaneidade (Autoconsumo %):",
+    min_value=10,
+    max_value=90,
+    value=35,
+    help="Percentual da energia gerada consumida instantaneamente sem passar pela rede da distribuidora."
+) / 100.0
 
 st.sidebar.header("3. Premissas Financeiras (VPL / TIR)")
 tma = st.sidebar.slider("Taxa Mínima de Atratividade - TMA (% a.a.):", min_value=4.0, max_value=18.0, value=10.5, step=0.5) / 100.0
-reajuste_anual = st.sidebar.slider("Inflação Energética Estimada (% a.a.):", min_value=2.0, max_value=12.0, value=6.0, step=0.5) / 100.0
+reajuste_anual = st.sidebar.slider("Inflação Energética Estimada (% a.a.):", min_value=2.0, max_value=12.0, value=5.0, step=0.5) / 100.0
 
 # --- 3. CÁLCULOS FÍSICOS E DE ENGENHARIA ---
-dados_cidade = base_climatica[cidade]
-hsp_mensal = dados_cidade["hsp"]
-hsp_medio = np.mean(hsp_mensal)
-temp_amb = dados_cidade["temp_amb"]
+dados_cidade = base_climatica.get(cidade)
+hsp_mensal = dados_cidade.get("hsp")
+hsp_medio = float(np.mean(hsp_mensal))
+temp_amb = dados_cidade.get("temp_amb")
 
-# Modelagem Térmica do Módulo (NOCT = 45°C, Irradiância ref = 800 W/m², Coef. Térmico = -0.35%/°C)
-temp_celula = temp_amb + ((45.0 - 20.0) / 800.0) * 800.0
+# Modelagem Térmica (NOCT = 45°C a 1000 W/m² pico -> elevação de +31.25°C sobre T_amb; Coef. Térmico = -0.35%/°C)
+temp_celula = temp_amb + 31.25
 perda_termica = max(0.0, (temp_celula - 25.0) * 0.0035)
 outras_perdas = 0.12  # Cabeamento CC/CA, sujeira, mismatch e eficiência do inversor (12%)
 performance_ratio = (1.0 - perda_termica) * (1.0 - outras_perdas)
 
 # Custo de disponibilidade (kWh/mês)
 disp_map = {"Monofásico (30 kWh)": 30, "Bifásico (50 kWh)": 50, "Trifásico (100 kWh)": 100}
-custo_disp_kwh = disp_map[tipo_ligacao]
+custo_disp_kwh = disp_map.get(tipo_ligacao)
 energia_compensavel_alvo = max(50.0, consumo_mensal - custo_disp_kwh)
+consumo_anual_compensavel = energia_compensavel_alvo * 12.0
 
 # Dimensionamento da Potência (kWp)
 potencia_necessaria_kwp = (energia_compensavel_alvo / 30.0) / (hsp_medio * performance_ratio)
@@ -91,15 +108,14 @@ potencia_real_kwp = (qtd_modulos * potencia_modulo_w) / 1000.0
 area_modulo_m2 = 2.58 if potencia_modulo_w == 550 else 2.75
 peso_modulo_kg = 28.5 if potencia_modulo_w == 550 else 31.0
 area_total_m2 = qtd_modulos * area_modulo_m2
-carga_estrutural_kg_m2 = (qtd_modulos * (peso_modulo_kg + 4.5)) / area_total_m2  # Inclui ~4.5 kg de estrutura de alumínio/fixação
+carga_estrutural_kg_m2 = (qtd_modulos * (peso_modulo_kg + 4.5)) / area_total_m2
 
 # Geração Mês a Mês (kWh)
 geracao_mensal = [potencia_real_kwp * hsp * performance_ratio * dias for hsp, dias in zip(hsp_mensal, dias_mes)]
 geracao_anual_ano1 = sum(geracao_mensal)
-co2_evitado_25anos_ton = (geracao_anual_ano1 * 25 * 0.94 * 0.085) / 1000.0  # Fator médio SIN (~0.085 tCO2/MWh)
+co2_evitado_25anos_ton = (geracao_anual_ano1 * 25 * 0.94 * 0.085) / 1000.0
 
-# --- 4. ENGENHARIA ECONÔMICA (ECONOMIA DE ESCALA + LEI 14.300) ---
-# Curva de economia de escala (R$/kWp instalado)
+# --- 4. ENGENHARIA ECONÔMICA (CONSERVADORA: LEI 14.300 + ICMS TUSD + O&M/SEGURO + INVERSOR) ---
 if potencia_real_kwp <= 5:
     custo_kwp = 3950.0
 elif potencia_real_kwp <= 15:
@@ -111,63 +127,74 @@ else:
 
 investimento_inicial = potencia_real_kwp * custo_kwp
 
-# Impacto Fio B (Lei 14.300: Fio B representa ~28% da tarifa e incide apenas sobre a parcela injetada na rede)
-parcela_fio_b = 0.28
+# 34% não compensável na energia injetada (~28% Fio B + ~6% ICMS/tributos sobre TUSD)
+parcela_nao_compensavel = 0.34
 percentual_injetado = 1.0 - simultaneidade
-# Fator de cobrança do Fio B (60% em 2026, 75% em 2027, 90% em 2028, 100% a partir de 2029)
-cronograma_fio_b = [0.60, 0.75, 0.90] + [1.00] * 22
+cronograma_fio_b = (0.60, 0.75, 0.90) + (1.00,) * 22
 
 anos = list(range(0, 26))
 fluxo_caixa = [-investimento_inicial]
 fluxo_acumulado = [-investimento_inicial]
 fluxo_descontado_acumulado = [-investimento_inicial]
 
-payback_simples = None
-payback_descontado = None
+payback_simples_frac = None
+payback_descontado_frac = None
 
 for ano in range(1, 26):
     degradacao = (1.0 - 0.005) ** (ano - 1)
     geracao_ano = geracao_anual_ano1 * degradacao
+    
+    # Energia aproveitada limitada a 97% do consumo compensável (desconto de descasamento sazonal verão/inverno)
+    energia_aproveitada = min(geracao_ano, consumo_anual_compensavel * 0.97)
     tarifa_ano = tarifa * ((1.0 + reajuste_anual) ** (ano - 1))
     
-    # Custo do Fio B apenas sobre a energia injetada na rede
     fator_cobranca = cronograma_fio_b[ano - 1]
-    custo_fio_b_anual = (geracao_ano * percentual_injetado) * (tarifa_ano * parcela_fio_b * fator_cobranca)
+    custo_rede_anual = (energia_aproveitada * percentual_injetado) * (tarifa_ano * parcela_nao_compensavel * fator_cobranca)
     
-    # Custo de O&M (limpeza e manutenção preventiva anual estimada em 0.8% do CAPEX)
-    custo_om = investimento_inicial * 0.008
+    # O&M + Seguro anual (1.3% do CAPEX corrigido pela inflação) + Troca do inversor no Ano 13 (25% CAPEX)
+    custo_om_seguro = (investimento_inicial * 0.013) * ((1.0 + reajuste_anual) ** (ano - 1))
+    troca_inversor = (investimento_inicial * 0.25) if ano == 13 else 0.0
     
-    economia_liquida = (geracao_ano * tarifa_ano) - custo_fio_b_anual - custo_om
+    economia_liquida = (energia_aproveitada * tarifa_ano) - custo_rede_anual - custo_om_seguro - troca_inversor
     
     fluxo_caixa.append(economia_liquida)
-    saldo_acum = fluxo_acumulado[-1] + economia_liquida
+    saldo_anterior = fluxo_acumulado[-1]
+    saldo_acum = saldo_anterior + economia_liquida
     fluxo_acumulado.append(saldo_acum)
     
-    # Fluxo descontado pela TMA para VPL e Payback Descontado
     vp_fluxo = economia_liquida / ((1.0 + tma) ** ano)
-    saldo_desc_acum = fluxo_descontado_acumulado[-1] + vp_fluxo
+    saldo_desc_anterior = fluxo_descontado_acumulado[-1]
+    saldo_desc_acum = saldo_desc_anterior + vp_fluxo
     fluxo_descontado_acumulado.append(saldo_desc_acum)
     
-    if saldo_acum >= 0 and payback_simples is None:
-        payback_simples = ano
-    if saldo_desc_acum >= 0 and payback_descontado is None:
-        payback_descontado = ano
+    # Interpolação linear para Payback fracionado preciso (ex: 5.0 anos)
+    if saldo_acum >= 0 and payback_simples_frac is None:
+        payback_simples_frac = (ano - 1) + (abs(saldo_anterior) / economia_liquida)
+    if saldo_desc_acum >= 0 and payback_descontado_frac is None:
+        payback_descontado_frac = (ano - 1) + (abs(saldo_desc_anterior) / vp_fluxo)
 
 vpl = fluxo_descontado_acumulado[-1]
 
-# Cálculo da TIR (Taxa Interna de Retorno) via raízes polinomiais (equivalente ao np.irr)
-coeficientes = fluxo_caixa[::-1]
-raizes = np.roots(coeficientes)
-raizes_reais = raizes[np.isreal(raizes)].real
-raiz_positiva = [r for r in raizes_reais if r > 0]
-tir = ((1.0 / raiz_positiva[0]) - 1.0) * 100.0 if raiz_positiva else 0.0
+# Cálculo robusto da TIR (Método da Bisseção sobre o VPL - à prova de múltiplos fluxos negativos)
+def calcular_tir(fluxos):
+    baixo, alto = -0.99, 5.0
+    for _ in range(100):
+        meio = (baixo + alto) / 2.0
+        vpl_teste = sum(fc / ((1.0 + meio) ** t) for t, fc in enumerate(fluxos))
+        if vpl_teste > 0:
+            baixo = meio
+        else:
+            alto = meio
+    return ((baixo + alto) / 2.0) * 100.0
+
+tir = calcular_tir(fluxo_caixa)
 
 # --- 5. INTERFACE EM ABAS ---
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3 = st.tabs((
     "📊 Dimensionamento & Balanço Energético",
     "💰 Viabilidade Econômica (VPL / TIR)",
     "📐 Memorial de Cálculo & Premissas"
-])
+))
 
 with tab1:
     st.subheader(f"Resultados Técnicos — {cidade}")
@@ -179,7 +206,6 @@ with tab1:
 
     st.divider()
 
-    # Gráfico de Balanço Energético Mensal
     df_mensal = pd.DataFrame({
         "Mês": meses,
         "Geração FV (kWh)": geracao_mensal,
@@ -209,28 +235,30 @@ with tab1:
     st.plotly_chart(fig_mensal, use_container_width=True)
 
 with tab2:
-    st.subheader("Análise de Investimento (Considerando Lei 14.300 e O&M)")
+    st.subheader("Análise de Investimento (Modelo Conservador: Lei 14.300, O&M/Seguro e Inversor)")
     f1, f2, f3, f4 = st.columns(4)
     f1.metric("CAPEX Estimado", f"R$ {investimento_inicial:,.2f}", f"R$ {custo_kwp:,.2f} / kWp")
-    f2.metric("Payback Descontado", f"{payback_descontado} anos" if payback_descontado else "> 25 anos", f"Simples: {payback_simples} anos")
-    f3.metric("VPL (Valor Presente Líquido)", f"R$ {vpl:,.2f}", f"TMA: {tma*100:.1f}% a.a.")
-    f4.metric("TIR (Taxa Interna de Retorno)", f"{tir:.1f}% a.a.", "Retorno sobre capital")
-
-    st.divider()
-
-    df_financeiro = pd.DataFrame({
-        "Ano": anos,
-        "Fluxo Líquido Anual (R$)": fluxo_caixa,
-        "Saldo Acumulado Simples (R$)": fluxo_acumulado,
-        "Saldo Acumulado Descontado (R$)": fluxo_descontado_acumulado
-    })
-
-    fig_fin = go.Figure()
-    fig_fin.add_trace(go.Bar(
-        x=df_financeiro["Ano"],
-        y=df_financeiro["Saldo Acumulado Descontado (R$)"],
-        name="Saldo Acumulado Descontado (VPL)",
-marker_color=["#EF553B" if val < 0 else "#00CC96" for val in df_financeiro["Saldo Acumulado Descontado (R$)"]]
+    f2.metric(
+        "Payback Descontado",
+        f"{payback_descontado_frac:.1f} anos" if payback_descontado_frac else "> 25 anos",
+        f"Simples: {payback_simples_frac:.1f} anos" if payback_simples_frac else "> 25 anos"
+    )
+f3.metric("VPL (Valor Presente Líquido)", f"R$ {vpl:,.2f}", f"TMA: {tma*100:.1f}% a.a.")
+f4.metric("TIR (Taxa Interna de Retorno)", f"{tir:.1f}% a.a.", "Retorno sobre capital")
+st.divider()
+df_financeiro = pd.DataFrame({
+"Ano": anos,
+"Fluxo Líquido Anual (R$)": fluxo_caixa,
+"Saldo Acumulado Simples (R$)": fluxo_acumulado,
+"Saldo Acumulado Descontado (R$)": fluxo_descontado_acumulado
+})
+cores_barras = ["#EF553B" if val < 0 else "#00CC96" for val in df_financeiro["Saldo Acumulado Descontado (R$)"]]
+fig_fin = go.Figure()
+fig_fin.add_trace(go.Bar(
+x=df_financeiro["Ano"],
+y=df_financeiro["Saldo Acumulado Descontado (R$)"],
+name="Saldo Acumulado Descontado (VPL)",
+marker_color=cores_barras
 ))
 fig_fin.add_trace(go.Scatter(
 x=df_financeiro["Ano"],
@@ -240,26 +268,29 @@ mode="lines",
 line=dict(color="#636EFA", width=2)
 ))
 fig_fin.update_layout(
-title="Evolução do Fluxo de Caixa Acumulado (25 Anos)",
+title="Evolução do Fluxo de Caixa Acumulado (25 Anos - inclui troca de inversor no Ano 13)",
 xaxis_title="Ano de Operação",
 yaxis_title="Valor Acumulado (R$)",
 hovermode="x unified"
 )
 st.plotly_chart(fig_fin, use_container_width=True)
-# Botão para download da planilha de fluxo de caixa
+nome_cidade_limpo = cidade.split(" - ").pop(0).lower().replace(" ", "")
+nome_arquivo = f"viabilidade_solar{nome_cidade_limpo}.csv"
 csv = df_financeiro.to_csv(index=False).encode("utf-8")
 st.download_button(
 label="📥 Baixar Tabela de Fluxo de Caixa (CSV)",
 data=csv,
-file_name=f"viabilidade_solar_{cidade.split(' ')[0].lower()}.csv",
+file_name=nome_arquivo,
 mime="text/csv"
 )
 with tab3:
+    # Conteúdo da Aba 3
     st.subheader("Equações e Premissas de Engenharia")
     st.markdown(f"""
+    * **Escopo de Aplicação:** Modelagem calibrada para unidades consumidoras do **Grupo B (Baixa Tensão)** em horizonte de 25 anos com aquisição via capital próprio (à vista).
     * **Base Solarimétrica:** Médias mensais de irradiação no plano horizontal obtidas via **CRESESB/CEPEL** para **{cidade}** (HSP médio anual: `{hsp_medio:.2f} kWh/m²·dia`).
-    * **Modelagem Térmica:** Temperatura estimada da célula fotovoltaica de **`{temp_celula:.1f} °C`** (baseada em T_amb = `{temp_amb} °C` e NOCT = `45 °C`), gerando perda térmica de **`{perda_termica*100:.2f}%`** (coeficiente térmico = `-0,35 %/°C`).
+    * **Modelagem Térmica (Pico STC):** Temperatura estimada da célula fotovoltaica de **`{temp_celula:.1f} °C`** (baseada em T_amb = `{temp_amb} °C`, NOCT = `45 °C` a 1000 W/m²), gerando perda térmica de **`{perda_termica*100:.2f}%`** (coeficiente térmico = `-0,35 %/°C`).
     * **Engenharia Estrutural:** Considera módulos comerciais de `{area_modulo_m2} m²` e `{peso_modulo_kg} kg` somados a `4,5 kg` de perfis de alumínio e grampos por módulo, resultando em uma carga distribuída de **`{carga_estrutural_kg_m2:.1f} kg/m²`**.
-    * **Regulação (Lei 14.300):** A parcela compensada via rede (`{(1-simultaneidade)*100:.0f}%` da geração) sofre cobrança escalonada do **Fio B** (estimado em 28% da tarifa cheia), enquanto o autoconsumo instantâneo (`{simultaneidade*100:.0f}%`) é isento.
-    * **Operação & Manutenção (O&M):** Desconto anual de `0,8%` sobre o CAPEX inicial para limpeza periódica dos módulos e inspeção elétrica/mecânica, além de degradação linear de `0,5% a.a.` na geração.
+    * **Regulação (Lei 14.300 + Tributos):** A parcela compensada via rede (`{(1-simultaneidade)*100:.0f}%` da geração, limitada a 97% do consumo compensável) sofre cobrança escalonada de **34%** sobre a tarifa cheia (~28% Fio B + ~6% ICMS/tributos sobre TUSD), enquanto o autoconsumo instantâneo (`{simultaneidade*100:.0f}%`) é isento.
+    * **Operação, Manutenção, Seguro e Reposição:** Desconto anual de `1,3%` sobre o CAPEX (corrigido pela inflação) para limpeza, seguro e inspeção, degradação linear de `0,5% a.a.` nos módulos e provisão de `25%` do CAPEX no **Ano 13** para substituição do inversor.
     """)
